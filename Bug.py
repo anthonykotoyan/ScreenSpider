@@ -2,6 +2,8 @@ import math
 import time
 import random
 
+import pygame
+
 from Leg import Leg
 from util import *
 
@@ -37,9 +39,19 @@ class Bug:
     UPPER_LOWER_X_PULL_IN_FACTOR = 5
     STOP_LEG_OFFSET = .8
 
-    MAX_SPEED = 4
+    MAX_SPEED = 3
     ACCELERATION = .1
     STOP_RADIUS = 10
+
+    # movement steering
+    STEERING_FORCE = .28
+    BRAKE_FORCE = .55
+    ARRIVE_RADIUS = 170
+
+    # speed penalty based on body angle vs movement angle
+    FORWARD_SPEED_MULT = 1.0
+    SIDE_SPEED_MULT = 0.55
+    BACKWARD_SPEED_MULT = 0.25
 
     MIN_WAIT = 1
     MAX_WAIT = 4
@@ -206,10 +218,24 @@ class Bug:
 
         direction = direction.normalize()
 
-        self.vel += direction * self.acc
+        desiredVel = direction * self.speed
+        steering = desiredVel - self.vel
 
-        if self.vel.magnitude() >= self.speed:
-            self.vel = direction * self.speed
+        if self.vel.length_squared() > self.speed * self.speed:
+            maxForce = Bug.BRAKE_FORCE
+        else:
+            maxForce = Bug.STEERING_FORCE
+
+        if steering.length_squared() > maxForce * maxForce:
+            steering.scale_to_length(maxForce)
+
+        self.vel += steering
+
+        if self.vel.length_squared() > self.speed * self.speed:
+            if self.speed <= 0:
+                self.vel = pygame.Vector2(0, 0)
+            else:
+                self.vel.scale_to_length(self.speed)
 
         self.pos += self.vel
 
@@ -256,8 +282,29 @@ class Bug:
 
         self.moveFacingDir = pygame.Vector2(moveDirection)
 
+        bodyAngle = math.radians(self.dir)
+
+        bodyForward = pygame.Vector2(
+            math.sin(bodyAngle),
+            -math.cos(bodyAngle)
+        )
+
+        moveDot = bodyForward.dot(moveDirection)
+        moveDot = max(-1, min(1, moveDot))
+
+        if moveDot >= 0:
+            speedMult = Bug.SIDE_SPEED_MULT + (
+                Bug.FORWARD_SPEED_MULT - Bug.SIDE_SPEED_MULT
+            ) * moveDot
+        else:
+            speedMult = Bug.BACKWARD_SPEED_MULT + (
+                Bug.SIDE_SPEED_MULT - Bug.BACKWARD_SPEED_MULT
+            ) * (moveDot + 1)
+
+        arriveMult = min(distance / Bug.ARRIVE_RADIUS, 1)
+
         self.speed = min(
-            Bug.MAX_SPEED * math.sqrt(distance / (WIDTH / 2)),
+            Bug.MAX_SPEED * arriveMult * speedMult,
             Bug.MAX_SPEED
         )
 
@@ -275,7 +322,7 @@ class Bug:
         # fangs
         pygame.draw.line(
             self.surf,
-            self.color,
+            self.abdomen_color,
             (self.center.x - 4 - .5, self.center.y - self.height / 2 + 2),
             (self.center.x - 2 - .5, self.center.y - self.height / 2 - 3),
             2
@@ -283,7 +330,7 @@ class Bug:
 
         pygame.draw.line(
             self.surf,
-            self.color,
+            self.abdomen_color,
             (self.center.x + 4 - .5, self.center.y - self.height / 2 + 2),
             (self.center.x + 2 - .5, self.center.y - self.height / 2 - 3),
             2
@@ -407,12 +454,9 @@ class Bug:
                 continue
 
             if isMoving:
-                # This is the old good alternating logic:
-                # step when a foot is dragged backward along the movement direction
                 r_drag = (r_neutral - rLeg.target).dot(reachDir)
                 l_drag = (l_neutral - lLeg.target).dot(reachDir)
             else:
-                # When only turning, there is no forward drag direction
                 r_drag = (r_neutral - rLeg.target).length()
                 l_drag = (l_neutral - lLeg.target).length()
 
@@ -446,4 +490,3 @@ class Bug:
 
                 elif l_wants_step and (r_drag >= 0 or l_drag > l_force):
                     lLeg.target = l_step_target
-

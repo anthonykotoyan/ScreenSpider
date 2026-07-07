@@ -31,7 +31,7 @@ BLACK = (0, 0, 0)
 
 clock = pygame.time.Clock()
 bugs = []
-for i in range(1):
+for i in range(20):
     bugs.append(Bug())
 
 
